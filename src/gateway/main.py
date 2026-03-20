@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from fastapi import FastAPI, HTTPException, Security
@@ -70,15 +72,16 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 async def verify_api_key(key: str | None = Security(api_key_header)):
-    if config.gateway.api_key and key != config.gateway.api_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    if config.gateway.api_key:
+        if not key or key != config.gateway.api_key:
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
 class DocumentInput(BaseModel):
-    text: str
+    text: str = Field(..., max_length=100_000)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -155,11 +158,20 @@ async def healthz():
 # Collection endpoints
 # ---------------------------------------------------------------------------
 @app.post("/v1/collections", response_model=CollectionInfo, dependencies=[Security(verify_api_key)])
+def _validate_collection_name(name: str) -> None:
+    if not re.match(r'^[a-zA-Z0-9_-]{1,100}$', name):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid collection name. Use alphanumeric, hyphens, underscores only (max 100 chars)",
+        )
+
+
 async def create_collection(body: CollectionCreateRequest):
     assert vector_store is not None
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Collection name must not be empty")
+    _validate_collection_name(name)
     vector_store.create_collection(name)
     return CollectionInfo(name=name)
 
@@ -174,6 +186,7 @@ async def list_collections():
 @app.delete("/v1/collections/{name}", dependencies=[Security(verify_api_key)])
 async def delete_collection(name: str):
     assert vector_store is not None
+    _validate_collection_name(name)
     if name not in vector_store.list_collections():
         raise HTTPException(status_code=404, detail=f"Collection '{name}' not found")
     vector_store.delete_collection(name)
@@ -189,11 +202,14 @@ async def index_documents(name: str, body: IndexRequest):
     assert embedding_client is not None
     assert chunker is not None
 
+    _validate_collection_name(name)
     if name not in vector_store.list_collections():
         raise HTTPException(status_code=404, detail=f"Collection '{name}' not found")
 
     if not body.documents:
         raise HTTPException(status_code=400, detail="No documents provided")
+    if len(body.documents) > 1000:
+        raise HTTPException(status_code=413, detail="Too many documents (max 1000 per request)")
 
     # Chunk all documents
     all_chunks: list[dict] = []
@@ -294,7 +310,8 @@ async def rag(body: RAGRequest):
     )
 
     # 4. Call Language Insight API chat completion
-    llm_endpoint = config.embedding.endpoint.rsplit("/", 2)[0] + "/v1/chat/completions"
+    parsed = urlparse(config.embedding.endpoint)
+    llm_endpoint = urlunparse((parsed.scheme, parsed.netloc, "/v1/chat/completions", "", "", ""))
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(

@@ -33,20 +33,26 @@ chunker: TextChunker | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global embedding_client, vector_store, chunker
-    embedding_client = EmbeddingClient(
-        endpoint=config.embedding.endpoint,
-        model=config.embedding.model,
-    )
-    vector_store = VectorStore(
-        db_path=config.storage.path,
-        dimensions=config.embedding.dimensions,
-    )
-    chunker = TextChunker(
-        max_chunk_size=config.chunking.max_chunk_size,
-        overlap=config.chunking.overlap,
-    )
-    logger.info("Search Insight API started on port %s", config.gateway.port)
+    try:
+        embedding_client = EmbeddingClient(
+            endpoint=config.embedding.endpoint,
+            model=config.embedding.model,
+        )
+        vector_store = VectorStore(
+            db_path=config.storage.path,
+            dimensions=config.embedding.dimensions,
+        )
+        chunker = TextChunker(
+            max_chunk_size=config.chunking.max_chunk_size,
+            overlap=config.chunking.overlap,
+        )
+        logger.info("Search Insight API initialized successfully")
+    except Exception as e:
+        logger.error("Failed to initialize: %s", e)
+        raise
     yield
+    if embedding_client:
+        await embedding_client.close()
     logger.info("Search Insight API shutting down")
 
 
@@ -329,7 +335,12 @@ async def rag(body: RAGRequest):
     except (httpx.HTTPStatusError, httpx.RequestError) as exc:
         raise HTTPException(status_code=502, detail=f"LLM service error: {exc}")
 
-    answer = llm_data["choices"][0]["message"]["content"]
+    try:
+        answer = llm_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not answer:
+            raise ValueError("Empty LLM response")
+    except (IndexError, KeyError, TypeError, ValueError) as e:
+        raise HTTPException(status_code=502, detail=f"LLM returned unexpected format: {e}")
     sources = [
         RAGSource(id=r["id"], text=r["text"], score=r["score"])
         for r in results

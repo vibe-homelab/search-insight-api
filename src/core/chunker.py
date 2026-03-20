@@ -103,7 +103,7 @@ class TextChunker:
                 merged.append(chunk)
             else:
                 # Prepend the tail of the previous chunk as overlap context.
-                prev = chunks[i - 1]
+                prev = merged[i - 1]
                 overlap_text = prev[-self.overlap :] if len(prev) > self.overlap else prev
                 combined = overlap_text + chunk
                 # Trim back to max size if needed.

@@ -1,0 +1,21 @@
+services:
+  search-insight-api:
+    build: .
+    container_name: search-insight-api
+    ports:
+      - "8600:8600"
+    volumes:
+      - search-data:/app/data/lancedb
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8600/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  search-data:

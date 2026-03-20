@@ -71,6 +71,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import time
+import uuid
+
+
+@app.middleware("http")
+async def request_logging_middleware(request, call_next):
+    request_id = uuid.uuid4().hex[:8]
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = round((time.monotonic() - start) * 1000, 1)
+    logger.info(
+        "%s %s %s %sms [%s]",
+        request.method, request.url.path, response.status_code, duration_ms, request_id
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
+
 # ---------------------------------------------------------------------------
 # Optional API-key auth
 # ---------------------------------------------------------------------------

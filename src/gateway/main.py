@@ -259,7 +259,7 @@ async def index_documents(name: str, body: IndexRequest):
         )
 
     # Store in LanceDB
-    count = vector_store.add_documents(name, all_chunks, embeddings)
+    count = await vector_store.add_documents(name, all_chunks, embeddings)
     return IndexResponse(indexed=count, collection=name)
 
 

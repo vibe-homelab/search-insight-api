@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import httpx
 
+MAX_BATCH_SIZE = 100
+
 
 class EmbeddingClient:
     """Generate embeddings by calling the Language Insight API."""
@@ -28,8 +30,22 @@ class EmbeddingClient:
         """Return embedding vectors for each input text.
 
         Calls the Language Insight API ``/v1/embeddings`` endpoint which
-        follows the OpenAI-compatible format.
+        follows the OpenAI-compatible format.  Large inputs are automatically
+        split into batches of ``MAX_BATCH_SIZE``.
         """
+        if len(texts) <= MAX_BATCH_SIZE:
+            return await self._embed_batch(texts)
+
+        # Split into batches
+        all_embeddings: list[list[float]] = []
+        for i in range(0, len(texts), MAX_BATCH_SIZE):
+            batch = texts[i : i + MAX_BATCH_SIZE]
+            batch_embeddings = await self._embed_batch(batch)
+            all_embeddings.extend(batch_embeddings)
+        return all_embeddings
+
+    async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Send a single batch to the embedding endpoint."""
         client = await self._get_client()
         resp = await client.post(
             self.endpoint,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 
@@ -16,6 +17,12 @@ class VectorStore:
         Path(db_path).mkdir(parents=True, exist_ok=True)
         self.db = lancedb.connect(db_path)
         self.dimensions = dimensions
+        self._write_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, collection: str) -> asyncio.Lock:
+        if collection not in self._write_locks:
+            self._write_locks[collection] = asyncio.Lock()
+        return self._write_locks[collection]
 
     # ------------------------------------------------------------------
     # Collection management
@@ -51,7 +58,7 @@ class VectorStore:
     # Document operations
     # ------------------------------------------------------------------
 
-    def add_documents(
+    async def add_documents(
         self,
         collection: str,
         documents: list[dict],
@@ -59,11 +66,19 @@ class VectorStore:
     ) -> int:
         """Insert documents with their embeddings into *collection*.
 
-        Each document dict must contain at least ``text``.  An optional
-        ``metadata`` key (dict or JSON string) is stored alongside it.
-
+        Acquires a per-collection write lock to prevent concurrent writes.
         Returns the number of rows added.
         """
+        async with self._get_lock(collection):
+            return self._add_documents_sync(collection, documents, embeddings)
+
+    def _add_documents_sync(
+        self,
+        collection: str,
+        documents: list[dict],
+        embeddings: list[list[float]],
+    ) -> int:
+        """Synchronous insert logic (called under lock)."""
         import json
 
         table = self.db.open_table(collection)
@@ -105,12 +120,13 @@ class VectorStore:
                     meta = json.loads(meta)
                 except json.JSONDecodeError:
                     meta = {}
+            distance = row.get("_distance")
             out.append(
                 {
                     "id": row["id"],
                     "text": row["text"],
                     "metadata": meta,
-                    "score": float(row.get("_distance", 0.0)),
+                    "score": float(distance) if distance is not None else None,
                 }
             )
         return out

@@ -9,6 +9,9 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     environment:
       - CONFIG_PATH=/app/config.yaml
+      - EMBEDDING_ENDPOINT=http://host.docker.internal:8400/v1/embeddings
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8600/healthz"]

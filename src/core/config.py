@@ -59,9 +59,19 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
 
-    return AppConfig(
+    cfg = AppConfig(
         embedding=EmbeddingConfig(**raw.get("embedding", {})),
         storage=StorageConfig(**raw.get("storage", {})),
         gateway=GatewayConfig(**raw.get("gateway", {})),
         chunking=ChunkingConfig(**raw.get("chunking", {})),
     )
+
+    # Environment variable overrides (useful for Docker)
+    if os.getenv("EMBEDDING_ENDPOINT"):
+        cfg.embedding.endpoint = os.environ["EMBEDDING_ENDPOINT"]
+    if os.getenv("GATEWAY_PORT"):
+        cfg.gateway.port = int(os.environ["GATEWAY_PORT"])
+    if os.getenv("GATEWAY_API_KEY"):
+        cfg.gateway.api_key = os.environ["GATEWAY_API_KEY"]
+
+    return cfg
